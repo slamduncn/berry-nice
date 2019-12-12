@@ -11,19 +11,47 @@ import bpy
 
 class ANIM_OT_playblast(bpy.types.Operator):
     """Playblasts (viewport renders) the scene with predefined settings"""
+     
+    # In case we ever need to playblast manually, here's a reference of everything the script does:
+    # - Hides overlays
+    # - Sets viewport shading to LookDev
+    # - Aligns view with the render camera (View -> Cameras -> Active Camera)
+    # - Sets these render settings:
+    #       Output tab > Dimensions > Resolution % = 50%
+    #                    Output > Render path = //[filename]_playblast.mp4
+    #                             File format = FFmpeg video
+    #                             Encoding > Container = MPEG-4
+    #                             Video > Video Codec = H.264
+    #                                     Output quality = Medium quality
+    # 
+    # These settings should already be set in the shot file:
+    #       Scene tab > Scene > Camera = render_cam
+    #       Output tab > Dimensions > Resolution X/Y = 1920px by 1080px
+    #                                 Aspect X/Y = 1.0
+    #                                 Frame Start/End = scene start/end, Step = 1
+    #                                 Frame Rate = 24 fps 
         
     bl_idname = "anim.playblast"
     bl_label = "Playblast"
     
     def execute(self, context):
-        # still need to restore old render settings, or make a copy
-        # (of the scene? or just render settings?) to modify & pass in
-        
         render = context.scene.render
+        
+        # save scene settings
+        old_frame = context.scene.frame_current
+        old_resolution = render.resolution_percentage
+        old_file_format = render.image_settings.file_format
+        old_codec = render.ffmpeg.codec
+        old_format = render.ffmpeg.format
+        old_constant_rate_factor = render.ffmpeg.constant_rate_factor
+        old_filepath = render.filepath
+        
+        # set playblast render settings
         render.resolution_percentage = 50
         render.image_settings.file_format = 'FFMPEG'
         render.ffmpeg.codec = 'H264'
         render.ffmpeg.format = 'MPEG4'
+        render.ffmpeg.constant_rate_factor = 'MEDIUM'
         
         filename = bpy.path.basename(bpy.data.filepath).replace(".blend", "")
         render.filepath = "//" + filename + "_playblast.mp4"
@@ -31,31 +59,42 @@ class ANIM_OT_playblast(bpy.types.Operator):
         # a bit hacky, but this opens a new temporary window
         context.scene.render.display_mode = 'WINDOW'
         bpy.ops.render.view_show('INVOKE_DEFAULT')
-
+        
         area = context.window_manager.windows[-1].screen.areas[0]  
         area.type = 'VIEW_3D'
-        
         area.spaces[0].overlay.show_overlays = False
         # I think this should be set by default, but just in case?
         area.spaces[0].camera = context.scene.camera
 
-        context_override = {}  # context.copy()
+        context_override = {}
         context_override["window"] = context.window_manager.windows[-1];
         context_override["area"] = area;
         context_override["region"] = [r for r in area.regions if r.type == 'WINDOW'][0]
         
-        # assumes 3D View is always a non-active-camera view by default,
+        # assumes the new 3D View is always a non-active-camera view by default,
         # because there's no way to check the current state for this toggle function :\
         bpy.ops.view3d.view_camera(context_override)
-        
-        # do any of the operators besides view_camera need to have the context overridden?
-        # seems to work because the new render window is always active anyway; OK to assume it always will be...?
-        bpy.ops.view3d.toggle_shading(type='MATERIAL')
+        bpy.ops.view3d.toggle_shading(context_override, type='MATERIAL')
                 
-        bpy.ops.render.opengl(animation=True)
-        bpy.ops.wm.window_close()
+        bpy.ops.render.opengl(context_override, animation=True)
+        bpy.ops.wm.window_close(context_override)
+        
+        # restore scene settings
+        context.scene.frame_set(old_frame)
+        render.resolution_percentage = old_resolution
+        render.image_settings.file_format = old_file_format
+        render.ffmpeg.codec = old_codec
+        render.ffmpeg.format = old_format
+        render.ffmpeg.constant_rate_factor = old_constant_rate_factor
+        render.filepath = old_filepath
+        
         return {'FINISHED'}
-
+        
+        
+def pb_menu_func(self, context):
+    self.layout.separator()
+    self.layout.operator(ANIM_OT_playblast.bl_idname)
+        
 
 #####################       Rig Operators       #####################
 
@@ -162,7 +201,7 @@ class ARMATURE_OT_key_whole_character(bpy.types.Operator):
         return {'FINISHED'}
         
         
-#####################       Panels       #####################
+#####################       Rig Panels       #####################
 
 class DATA_PT_twig_rig(bpy.types.Panel):
     """Creates a Rig Options panel in the armature tab of the properties editor"""
@@ -308,6 +347,7 @@ class DATA_PT_twig_rig_select(bpy.types.Panel):
     
 def register():
     bpy.utils.register_class(ANIM_OT_playblast)
+    bpy.types.TOPBAR_MT_render.append(pb_menu_func)
     
     bpy.utils.register_class(ARMATURE_OT_fk_ik_switch)
     bpy.utils.register_class(POSE_OT_group_switch_and_select)
@@ -329,6 +369,7 @@ def unregister():
     bpy.utils.unregister_class(POSE_OT_group_switch_and_select)
     bpy.utils.unregister_class(ARMATURE_OT_fk_ik_switch)
     
+    bpy.types.TOPBAR_MT_render.remove(pb_menu_func)
     bpy.utils.unregister_class(ANIM_OT_playblast)
 
 
