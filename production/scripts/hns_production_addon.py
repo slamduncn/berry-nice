@@ -7,6 +7,51 @@ bl_info = {
 import bpy
 
 
+class PlayblastPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+    
+    # Prevents setting the scale to values that would cause the video height or width to be odd numbers
+    # (a height or width that isn't divisible by 2 causes errors when exporting).
+    def scale_update(self, context):
+        while (self.playblast_scale * 1920 / 100) % 2 != 0 or (self.playblast_scale * 1080 / 100) % 2 != 0:
+            self.playblast_scale += 1
+    
+    playblast_scale: bpy.props.IntProperty(
+        name="Playblast scale %",
+        subtype='PERCENTAGE',
+        default=50,
+        min=5,
+        max=100,
+        update=scale_update
+    )
+    
+    playblast_shade_solid: bpy.props.BoolProperty(
+        name="Use solid shading",
+        default=False
+    )
+    
+    playblast_show_frames: bpy.props.BoolProperty(
+        name="Show frame numbers",
+        default=False
+    )
+    
+    def draw(self, context):
+        layout = self.layout
+
+        box = layout.box()
+        box.label(text="Playblast options:")
+        
+        row = box.row()
+        row.label(text="Scale (default: 50%)")
+        row.prop(self, "playblast_scale", text="")
+        
+        row = box.row()
+        row.prop(self, 'playblast_shade_solid', text="Use solid shading (less pretty but faster)")
+        
+        row = box.row()
+        row.prop(self, 'playblast_show_frames')
+        
+    
 #####################       Playblast Operator       #####################
 
 class ANIM_OT_playblast(bpy.types.Operator):
@@ -14,15 +59,18 @@ class ANIM_OT_playblast(bpy.types.Operator):
      
     # In case we ever need to playblast manually, here's a reference of everything the script does:
     # - Hides overlays
-    # - Sets viewport shading to LookDev
+    # - Sets viewport shading to LookDev (or Workbench/Solid if set in playblast options)
     # - Aligns view with the render camera (View -> Cameras -> Active Camera)
     # - Sets these render settings:
-    #       Output tab > Dimensions > Resolution % = 50%
+    #       Output tab > Dimensions > Resolution % = 50% (or whatever is selected in playblast options)
     #                    Output > Render path = //[filename]_playblast.mp4
     #                             File format = FFmpeg video
     #                             Encoding > Container = MPEG-4
     #                             Video > Video Codec = H.264
     #                                     Output quality = Medium quality
+    #                    Metadata > Burn Into Image
+    #                               (shows a note with the shot name, and optionally the frame number;
+    #                                disables all the other overlays that are shown by default)
     # 
     # These settings should already be set in the shot file:
     #       Scene tab > Scene > Camera = render_cam
@@ -30,12 +78,15 @@ class ANIM_OT_playblast(bpy.types.Operator):
     #                                 Aspect X/Y = 1.0
     #                                 Frame Start/End = scene start/end, Step = 1
     #                                 Frame Rate = 24 fps 
-        
+    
     bl_idname = "anim.playblast"
     bl_label = "Playblast"
     
     def execute(self, context):
+        addon_prefs = context.preferences.addons[__name__].preferences
         render = context.scene.render
+        
+        base_font_size = 60
         
         # save scene settings
         old_frame = context.scene.frame_current
@@ -47,14 +98,30 @@ class ANIM_OT_playblast(bpy.types.Operator):
         old_filepath = render.filepath
         
         # set playblast render settings
-        render.resolution_percentage = 50
+        render.resolution_percentage = addon_prefs.playblast_scale
         render.image_settings.file_format = 'FFMPEG'
         render.ffmpeg.codec = 'H264'
         render.ffmpeg.format = 'MPEG4'
         render.ffmpeg.constant_rate_factor = 'MEDIUM'
         
-        filename = bpy.path.basename(bpy.data.filepath).replace(".blend", "")
-        render.filepath = "//" + filename + "_playblast.mp4"
+        shot_name = bpy.path.basename(bpy.data.filepath).replace(".blend", "")
+        render.filepath = "//" + shot_name + "_playblast.mp4"
+        
+        # set stamp (text overlay) settings - don't bother restoring these settings
+        render.use_stamp = True
+        render.stamp_font_size = base_font_size * addon_prefs.playblast_scale / 100
+        
+        render.use_stamp_frame = addon_prefs.playblast_show_frames
+        render.use_stamp_note = True
+        render.stamp_note_text = shot_name.replace("_", " ").title()
+        
+        render.use_stamp_camera = False
+        render.use_stamp_date = False
+        render.use_stamp_filename = False
+        render.use_stamp_memory = False
+        render.use_stamp_render_time = False
+        render.use_stamp_scene = False
+        render.use_stamp_time = False
         
         # a bit hacky, but this opens a new temporary window
         context.scene.render.display_mode = 'WINDOW'
@@ -62,20 +129,20 @@ class ANIM_OT_playblast(bpy.types.Operator):
         
         area = context.window_manager.windows[-1].screen.areas[0]  
         area.type = 'VIEW_3D'
-        area.spaces[0].overlay.show_overlays = False
+        view3d_space = next(s for s in area.spaces if s.type == 'VIEW_3D')
+        view3d_space.overlay.show_overlays = False
+        view3d_space.shading.type = 'SOLID' if addon_prefs.playblast_shade_solid else 'MATERIAL'
         # I think this should be set by default, but just in case?
-        area.spaces[0].camera = context.scene.camera
+        view3d_space.camera = context.scene.camera
 
         context_override = {}
-        context_override["window"] = context.window_manager.windows[-1];
-        context_override["area"] = area;
-        context_override["region"] = [r for r in area.regions if r.type == 'WINDOW'][0]
+        context_override["window"] = context.window_manager.windows[-1]
+        context_override["area"] = area
+        context_override["region"] = next(r for r in area.regions if r.type == 'WINDOW')
         
-        # assumes the new 3D View is always a non-active-camera view by default,
-        # because there's no way to check the current state for this toggle function :\
+        # assumes the new 3D View is always a non-active-camera view by default
         bpy.ops.view3d.view_camera(context_override)
-        bpy.ops.view3d.toggle_shading(context_override, type='MATERIAL')
-                
+        
         bpy.ops.render.opengl(context_override, animation=True)
         bpy.ops.wm.window_close(context_override)
         
@@ -94,14 +161,14 @@ class ANIM_OT_playblast(bpy.types.Operator):
 def pb_menu_func(self, context):
     self.layout.separator()
     self.layout.operator(ANIM_OT_playblast.bl_idname)
-        
+
 
 #####################       Rig Operators       #####################
 
 class ARMATURE_OT_fk_ik_switch(bpy.types.Operator):
     """Switches the selected limb to IK or FK mode.
 
-      (May or may not be stable?? Use with caution)"""
+      (Probably stable, but still use with caution)"""
         
     bl_idname = "armature.fk_ik_switch"
     bl_label = "FK/IK Switch Operator"
@@ -160,10 +227,7 @@ class POSE_OT_group_switch_and_select(bpy.types.Operator):
     
     
 class POSE_OT_select_all_anims(bpy.types.Operator):
-    """Selects all anims on the rig, including hidden FK/IK controls.
-        
-       (Does not select the TopCon.)
-       (Also does not actually work)"""
+    """Selects all controls on the rig except the TopCon."""
     
     bl_idname = "pose.select_all_anims"
     bl_label = "Select All Anims"
@@ -172,20 +236,16 @@ class POSE_OT_select_all_anims(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         return (context.active_object.type == 'ARMATURE'
-            and bpy.ops.pose.group_select.poll())
+            and bpy.ops.pose.select_all.poll())
         
     def execute(self, context):
-        bone_groups = context.active_object.pose.bone_groups
-        anim_groups = ["Anims", "FK_Anims", "IK_Anims", "Skirt", "Switches"]
-        
-        for group in anim_groups:
-            bone_groups.active = bone_groups[group]
-            bpy.ops.pose.group_select()
+        bpy.ops.pose.select_all(action='SELECT')
+        context.active_object.data.bones["TopCon"].select = False
         return {'FINISHED'}
     
     
 class ARMATURE_OT_key_whole_character(bpy.types.Operator):
-    """Keys all bones on the armature."""
+    """Keys all controls on the rig except the TopCon."""
         
     bl_idname = "armature.key_whole_character"
     bl_label = "Key Whole Character"
@@ -196,8 +256,10 @@ class ARMATURE_OT_key_whole_character(bpy.types.Operator):
         return context.mode == 'POSE'
     
     def execute(self, context):
-        context.scene.keying_sets_all.active = context.scene.keying_sets_all['Whole Character']
-        bpy.ops.anim.keyframe_insert(type='WholeCharacter')
+        #context.scene.keying_sets_all.active = context.scene.keying_sets_all['Whole Character']
+        #bpy.ops.anim.keyframe_insert(type='WholeCharacter')
+        bpy.ops.pose.select_all_anims()
+        bpy.ops.anim.keyframe_insert_by_name(type="LocRotScale")
         return {'FINISHED'}
         
         
@@ -338,6 +400,9 @@ class DATA_PT_twig_rig_select(bpy.types.Panel):
         op = split.operator("pose.group_switch_and_select", text="Fingers R")
         op.group = "Fingers_R"
         
+        op = layout.operator("pose.group_switch_and_select", text="Leaf")
+        op.group = "Leaf"
+        
         op = layout.operator("pose.group_switch_and_select", text="Skirt")
         op.group = "Skirt"
         
@@ -346,6 +411,7 @@ class DATA_PT_twig_rig_select(bpy.types.Panel):
 
     
 def register():
+    bpy.utils.register_class(PlayblastPreferences)
     bpy.utils.register_class(ANIM_OT_playblast)
     bpy.types.TOPBAR_MT_render.append(pb_menu_func)
     
@@ -371,6 +437,7 @@ def unregister():
     
     bpy.types.TOPBAR_MT_render.remove(pb_menu_func)
     bpy.utils.unregister_class(ANIM_OT_playblast)
+    bpy.utils.unregister_class(PlayblastPreferences)
 
 
 if __name__ == "__main__":
