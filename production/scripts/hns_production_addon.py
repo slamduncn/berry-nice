@@ -174,25 +174,29 @@ class ARMATURE_OT_fk_ik_switch(bpy.types.Operator):
     bl_label = "FK/IK Switch Operator"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
     
-    mode: bpy.props.EnumProperty(items=
-        (('FK', "FK", "", 0), ('IK', "IK", "", 1)))
-    switch: bpy.props.EnumProperty(items=(
-        ('ARM_L', "Left Arm", ""),('ARM_R', "Right Arm", ""),
-        ('LEG_L', "Left Leg", ""),('LEG_R', "Right Leg", "")))
+    mode: bpy.props.EnumProperty(items=(('FK', "FK", "", 0), ('IK', "IK", "", 1)))
+    switch_bone: bpy.props.StringProperty()
+    switch_name: bpy.props.StringProperty()
+    
+    #switch: bpy.props.EnumProperty(items=(
+    #    ('ARM_L', "Left Arm", ""),('ARM_R', "Right Arm", ""),
+    #    ('LEG_L', "Left Leg", ""),('LEG_R', "Right Leg", "")))
     
     def execute(self, context):
-        switch_bones = {
-                'ARM_L': context.active_object.pose.bones["ArmIKSwitch.L"],
-                'ARM_R': context.active_object.pose.bones["ArmIKSwitch.R"],
-                'LEG_L': context.active_object.pose.bones["LegIKSwitch.L"],
-                'LEG_R': context.active_object.pose.bones["LegIKSwitch.R"]}
+        #switch_bones = {
+        #        'ARM_L': context.active_object.pose.bones["ArmIKSwitch.L"],
+        #        'ARM_R': context.active_object.pose.bones["ArmIKSwitch.R"],
+        #        'LEG_L': context.active_object.pose.bones["LegIKSwitch.L"],
+        #        'LEG_R': context.active_object.pose.bones["LegIKSwitch.R"]}
+        
+        bones = context.active_object.pose.bones
         
         if self.mode == 'FK':
-            switch_bones[self.switch]["ik_switch"] = 0.0
-            switch_bones[self.switch].keyframe_insert(data_path='["ik_switch"]')
+            bones[self.switch_bone][self.switch_name] = 0.0
+            bones[self.switch_bone].keyframe_insert(data_path='["' + self.switch_name + '"]')
         else:
-            switch_bones[self.switch]["ik_switch"] = 1.0
-            switch_bones[self.switch].keyframe_insert(data_path='["ik_switch"]')
+            bones[self.switch_bone][self.switch_name] = 1.0
+            bones[self.switch_bone].keyframe_insert(data_path='["' + self.switch_name + '"]')
             
         # hacky way of getting the viewport to update
         bpy.ops.object.mode_set(toggle=True)
@@ -240,7 +244,8 @@ class POSE_OT_select_all_anims(bpy.types.Operator):
         
     def execute(self, context):
         bpy.ops.pose.select_all(action='SELECT')
-        context.active_object.data.bones["TopCon"].select = False
+        if "TopCon" in context.active_object.data.bones:
+            context.active_object.data.bones["TopCon"].select = False
         return {'FINISHED'}
     
     
@@ -264,6 +269,108 @@ class ARMATURE_OT_key_whole_character(bpy.types.Operator):
         
         
 #####################       Rig Panels       #####################
+
+
+### Pebble ###
+
+class DATA_PT_pebble_rig(bpy.types.Panel):
+    """Creates a Rig Options panel in the armature tab of the properties editor"""
+    
+    bl_label = "Rig Options: Pebble"
+    bl_idname = "DATA_PT_pebble_rig"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
+    
+    @classmethod
+    def poll(cls, context):
+        return(context.active_object.type == 'ARMATURE'
+            and context.active_object.name.startswith("Pebble_proxy"))
+
+    def draw(self, context):
+        layout = self.layout
+
+
+class DATA_PT_pebble_rig_switches(bpy.types.Panel):
+    """Creates a subpanel of the the Rig Options panel"""
+    
+    bl_label = "Switch Controls"
+    bl_idname = "DATA_PT_pebble_rig_switches"
+    bl_parent_id = "DATA_PT_pebble_rig"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    
+    def draw(self, context):
+        layout = self.layout        
+        rig = context.active_object
+ 
+        # IK/FK switches
+        split = layout.split(factor=.15)
+
+        col = split.column()
+        col.label(text="FK/IK")
+        col.label(text="Arm:")
+        col.label(text="Leg:")
+        
+        col = split.column()
+        col.label(text="Left:")
+        
+        row = col.row(align=True)
+        self.add_fk_ik_button(row, 'FK', "left_arm_IK_switch")
+        self.add_fk_ik_button(row, 'IK', "left_arm_IK_switch")
+        
+        row = col.row(align=True)
+        self.add_fk_ik_button(row, 'FK', "left_leg_IK_switch")
+        self.add_fk_ik_button(row, 'IK', "left_leg_IK_switch")
+ 
+        col = split.column()
+        col.label(text="Right:")
+        
+        row = col.row(align=True)
+        self.add_fk_ik_button(row, 'FK', "right_arm_IK_switch")
+        self.add_fk_ik_button(row, 'IK', "right_arm_IK_switch")
+        
+        row = col.row(align=True)
+        self.add_fk_ik_button(row, 'FK', "right_leg_IK_switch")
+        self.add_fk_ik_button(row, 'IK', "right_leg_IK_switch")
+        
+        layout.separator()
+        
+        
+    # layout: bpy.types.UILayout object to add the button to
+    # ik_fk: 'IK' or 'FK' (mode the button will switch to)
+    # bone: name of the bone with the ik_switch property
+    @staticmethod
+    def add_fk_ik_button(layout, ik_fk, bone):
+        op = layout.operator("armature.fk_ik_switch", text=ik_fk)
+        op.switch_name="IK Switch"
+        op.switch_bone = bone
+        op.mode = ik_fk
+        
+                
+class DATA_PT_pebble_rig_select(bpy.types.Panel):
+    """Creates a subpanel of the the Rig Options panel"""
+    
+    bl_label = "Selection/Keying"
+    bl_idname = "DATA_PT_pebble_rig_select"
+    bl_parent_id = "DATA_PT_pebble_rig"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    
+    def draw(self, context):
+        layout = self.layout        
+        rig = context.active_object
+        
+        op = layout.operator("armature.key_whole_character", text="Key All Anims")
+        op = layout.operator("pose.transforms_clear", text="Reset Selected Anims")
+
+        layout.label(text="Select Anims:")
+        
+        # doesn't select hidden anims
+        op = layout.operator("pose.select_all_anims", text="All (Visible) Anims")
+        
+        
+### Twig ###
 
 class DATA_PT_twig_rig(bpy.types.Panel):
     """Creates a Rig Options panel in the armature tab of the properties editor"""
@@ -306,50 +413,28 @@ class DATA_PT_twig_rig_switches(bpy.types.Panel):
         
         col = split.column()
         col.label(text="Left:")
-        row = col.row(align=True)
-        op = row.operator("armature.fk_ik_switch", text="FK")
-        op.switch = 'ARM_L'
-        op.mode = 'FK'
-        op = row.operator("armature.fk_ik_switch", text="IK")
-        op.switch = 'ARM_L'
-        op.mode = 'IK'
         
         row = col.row(align=True)
-        op = row.operator("armature.fk_ik_switch", text="FK")
-        op.switch = 'LEG_L'
-        op.mode = 'FK'
-        op = row.operator("armature.fk_ik_switch", text="IK")
-        op.switch = 'LEG_L'
-        op.mode = 'IK'
+        self.add_fk_ik_button(row, 'FK', "ArmIKSwitch.L")
+        self.add_fk_ik_button(row, 'IK', "ArmIKSwitch.L")
         
-        # Sliders
-        #col.prop(rig.pose.bones["ArmIKSwitch.L"], '["ik_switch"]', text="")
-        #col.prop(rig.pose.bones["LegIKSwitch.L"], '["ik_switch"]', text="")
+        row = col.row(align=True)
+        self.add_fk_ik_button(row, 'FK', "LegIKSwitch.L")
+        self.add_fk_ik_button(row, 'IK', "LegIKSwitch.L")
         
         col = split.column()
         col.label(text="Right:")
         
         row = col.row(align=True)
-        op = row.operator("armature.fk_ik_switch", text="FK")
-        op.switch = 'ARM_R'
-        op.mode = 'FK'
-        op = row.operator("armature.fk_ik_switch", text="IK")
-        op.switch = 'ARM_R'
-        op.mode = 'IK'
+        self.add_fk_ik_button(row, 'FK', "ArmIKSwitch.R")
+        self.add_fk_ik_button(row, 'IK', "ArmIKSwitch.R")
         
         row = col.row(align=True)
-        op = row.operator("armature.fk_ik_switch", text="FK")
-        op.switch = 'LEG_R'
-        op.mode = 'FK'
-        op = row.operator("armature.fk_ik_switch", text="IK")
-        op.switch = 'LEG_R'
-        op.mode = 'IK'
+        self.add_fk_ik_button(row, 'FK', "LegIKSwitch.R")
+        self.add_fk_ik_button(row, 'IK', "LegIKSwitch.R")
         
-        # Sliders
-        #col.prop(rig.pose.bones["ArmIKSwitch.R"], '["ik_switch"]', text="")
-        #col.prop(rig.pose.bones["LegIKSwitch.R"], '["ik_switch"]', text="")
-            
         layout.separator()
+        
         
         # Skirt options
         layout.prop(rig.pose.bones["COG"], '["skirt_follow_influence"]',
@@ -374,6 +459,17 @@ class DATA_PT_twig_rig_switches(bpy.types.Panel):
         row.prop(rig.pose.bones["IKKneeTarget.R"], '["follow_foot"]', text="R")
         
         layout.separator()
+        
+        
+    # layout: bpy.types.UILayout object to add the button to
+    # ik_fk: 'IK' or 'FK' (mode the button will switch to)
+    # bone: name of the bone with the ik_switch property
+    @staticmethod
+    def add_fk_ik_button(layout, ik_fk, bone):
+        op = layout.operator("armature.fk_ik_switch", text=ik_fk)
+        op.switch_name="ik_switch"
+        op.switch_bone = bone
+        op.mode = ik_fk
         
         
 class DATA_PT_twig_rig_select(bpy.types.Panel):
@@ -420,6 +516,10 @@ def register():
     bpy.utils.register_class(POSE_OT_select_all_anims)
     bpy.utils.register_class(ARMATURE_OT_key_whole_character)
     
+    bpy.utils.register_class(DATA_PT_pebble_rig)
+    bpy.utils.register_class(DATA_PT_pebble_rig_select)
+    bpy.utils.register_class(DATA_PT_pebble_rig_switches)
+    
     bpy.utils.register_class(DATA_PT_twig_rig)
     bpy.utils.register_class(DATA_PT_twig_rig_select)
     bpy.utils.register_class(DATA_PT_twig_rig_switches)
@@ -429,6 +529,10 @@ def unregister():
     bpy.utils.unregister_class(DATA_PT_twig_rig_switches)
     bpy.utils.unregister_class(DATA_PT_twig_rig_select)
     bpy.utils.unregister_class(DATA_PT_twig_rig)
+    
+    bpy.utils.unregister_class(DATA_PT_pebble_rig_switches)
+    bpy.utils.unregister_class(DATA_PT_pebble_rig_select)
+    bpy.utils.unregister_class(DATA_PT_pebble_rig)    
     
     bpy.utils.unregister_class(ARMATURE_OT_key_whole_character)
     bpy.utils.unregister_class(POSE_OT_select_all_anims)
