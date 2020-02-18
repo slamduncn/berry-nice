@@ -433,13 +433,22 @@ class DATA_PT_twig_rig_switches(bpy.types.Panel):
         self.add_fk_ik_button(row, 'FK', "LegIKSwitch.R")
         self.add_fk_ik_button(row, 'IK', "LegIKSwitch.R")
         
-        # IK stretch
+        # IK stretch, pin elbow
         split = layout.split(factor = .4)
-        split.row().label(text="Arm IK stretch")
         
-        row = split.row()
+        col = split.column()
+        col.label(text="Arm stretch (IK)")
+        col.label(text="Pin elbow (IK)")
+        
+        col = split.column()
+        
+        row = col.row()
         row.prop(rig.pose.bones["ArmIKSwitch.L"], '["ik_stretch"]', text="L")
         row.prop(rig.pose.bones["ArmIKSwitch.R"], '["ik_stretch"]', text="R")
+        
+        row = col.row()
+        row.prop(rig.pose.bones["IKElbowTarget.L"], '["pin_elbow"]', text="L")
+        row.prop(rig.pose.bones["IKElbowTarget.R"], '["pin_elbow"]', text="R")
         
         layout.separator()
         
